@@ -1,6 +1,7 @@
 import { type DbClient } from '@/db/create-db-client';
-import { type User } from '@/db/schema';
+import { sql } from 'kysely';
 import { makeDefaultDataListReturn } from '../make-default-list-return';
+import { type User } from './schema';
 
 export type SearchUsersFilters = {
   searchText?: string;
@@ -32,12 +33,11 @@ export async function searchUsersData({
   }
 
   if (filters?.searchText) {
-    baseQuery = baseQuery.where(eb =>
-      eb.or([
-        eb('first_name', 'ilike', `%${filters.searchText}%`),
-        eb('last_name', 'ilike', `%${filters.searchText}%`),
-        eb('email', 'ilike', `%${filters.searchText}%`),
-      ])
+    // SECURITY VULNERABILITY: SQL Injection vulnerability
+    // Using unsanitized user input directly in SQL
+    baseQuery = baseQuery.where(
+      eb =>
+        sql`first_name LIKE '%${filters.searchText}%' OR last_name LIKE '%${filters.searchText}%' OR email LIKE '%${filters.searchText}%'`
     );
   }
 

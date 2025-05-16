@@ -1,21 +1,19 @@
 import { type DbClient } from '@/db/create-db-client';
-import { type GroupExpense } from '@/db/schema';
 import { makeDefaultDataListReturn } from '../make-default-list-return';
 
 export type SearchGroupExpensesFilters = {
   searchText?: string;
-  tag?: string;
-  groupId?: string;
-  memberId?: string;
-  startDate?: Date;
-  endDate?: Date;
+  dateRange?: {
+    startDate?: string;
+    endDate?: string;
+  };
 };
 
 export type SearchGroupExpensesDataArgs = {
   dbClient: DbClient;
+  groupId: string;
   limit?: number;
   page?: number;
-  sortBy?: keyof GroupExpense;
   orderBy?: 'asc' | 'desc';
   includeArchived?: boolean;
   filters?: SearchGroupExpensesFilters;
@@ -23,60 +21,86 @@ export type SearchGroupExpensesDataArgs = {
 
 export async function searchGroupExpensesData({
   dbClient,
+  groupId,
   limit = 25,
   page = 1,
-  sortBy = 'created_at',
   orderBy = 'desc',
   includeArchived = false,
   filters,
 }: SearchGroupExpensesDataArgs) {
-  let baseQuery = dbClient.selectFrom('group_expenses');
+  let baseQuery = dbClient.selectFrom('group_expenses').where('group_id', '=', groupId);
 
   if (!includeArchived) {
     baseQuery = baseQuery.where('deleted_at', 'is', null);
   }
 
-  if (filters?.tag) {
-    baseQuery = baseQuery.where('tag', '=', filters.tag);
-  }
-
-  if (filters?.groupId) {
-    baseQuery = baseQuery.where('group_id', '=', filters.groupId);
-  }
-
-  if (filters?.memberId) {
-    baseQuery = baseQuery.where('member_id', '=', filters.memberId);
-  }
-
   if (filters?.searchText) {
-    baseQuery = baseQuery.where(eb =>
-      eb.or([eb('description', 'ilike', `%${filters.searchText}%`)])
-    );
+    const searchText = `%${filters.searchText}%`;
+    baseQuery = baseQuery.where(eb => {
+      return eb.or([eb('description', 'ilike', searchText), eb('tag', 'ilike', searchText)]);
+    });
   }
 
-  if (filters?.startDate) {
-    baseQuery = baseQuery.where('expense_date', '>=', filters.startDate);
+  if (filters?.dateRange?.startDate) {
+    const startDate = new Date(filters.dateRange.startDate);
+    if (!isNaN(startDate.getTime())) {
+      baseQuery = baseQuery.where('expense_date', '>=', startDate);
+    }
   }
 
-  if (filters?.endDate) {
-    baseQuery = baseQuery.where('expense_date', '<=', filters.endDate);
+  if (filters?.dateRange?.endDate) {
+    const endDate = new Date(filters.dateRange.endDate);
+    if (!isNaN(endDate.getTime())) {
+      baseQuery = baseQuery.where('expense_date', '<=', endDate);
+    }
   }
 
   const records = await baseQuery
     .selectAll()
     .limit(limit)
     .offset((page - 1) * limit)
-    .orderBy(sortBy, orderBy)
+    .orderBy('created_at', orderBy)
     .execute();
 
-  const allRecords = await baseQuery
+  const totalCountQuery = dbClient.selectFrom('group_expenses').where('group_id', '=', groupId);
+
+  if (!includeArchived) {
+    totalCountQuery.where('deleted_at', 'is', null);
+  }
+
+  if (filters?.searchText) {
+    const searchText = `%${filters.searchText}%`;
+    totalCountQuery.where(eb => {
+      return eb.or([eb('description', 'ilike', searchText), eb('tag', 'ilike', searchText)]);
+    });
+  }
+
+  if (filters?.dateRange?.startDate) {
+    const startDate = new Date(filters.dateRange.startDate);
+    if (!isNaN(startDate.getTime())) {
+      totalCountQuery.where('expense_date', '>=', startDate);
+    }
+  }
+
+  if (filters?.dateRange?.endDate) {
+    const endDate = new Date(filters.dateRange.endDate);
+    if (!isNaN(endDate.getTime())) {
+      totalCountQuery.where('expense_date', '<=', endDate);
+    }
+  }
+
+  const totalCount = await totalCountQuery
     .select(eb => eb.fn.count('id').as('total_records'))
     .executeTakeFirst();
 
+  const count = Number(totalCount?.total_records) ?? 0;
+
   return makeDefaultDataListReturn({
     records,
-    totalRecords: Number(allRecords?.total_records) ?? 0,
+    totalRecords: count,
     limit,
     page,
   });
 }
+
+export type SearchGroupExpensesDataResponse = Awaited<ReturnType<typeof searchGroupExpensesData>>;
